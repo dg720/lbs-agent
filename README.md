@@ -1,5 +1,15 @@
 # Data Project Template
 
+## Streamlit Chat Interface
+
+Run a simple local chat UI backed by the NHS 101 agent:
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Make sure `OPENAI_API_KEY` is set in your environment before launching Streamlit.
 
 ## Project Organization
 
