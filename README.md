@@ -49,3 +49,27 @@
 ```
 
 --------
+
+## Running the chatbot API
+
+Start a small FastAPI server that exposes the chatbot as a `/chat` endpoint:
+
+```bash
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Endpoints
+
+- `GET /health` — returns `{ "status": "ok" }` for uptime checks.
+- `POST /chat` — send `{ "message": "hi", "session_id": "<optional>" }` and receive a reply plus the session id to reuse on subsequent turns.
+
+Example request:
+
+```bash
+curl -X POST \
+  http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello, can you help me find a GP?"}'
+```
+
+The response contains the assistant reply and a `session_id` you can persist in your frontend or client to maintain conversation context.
