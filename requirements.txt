@@ -1,5 +1,4 @@
 ipykernel
-python-dotenv
 openai
-re 
-json
+python-dotenv
+streamlit
