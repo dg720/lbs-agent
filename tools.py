@@ -1,8 +1,9 @@
 import json
-from urllib.parse import quote_plus
-from openai import OpenAI
 import os
+from urllib.parse import quote_plus
+
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -17,6 +18,7 @@ def tool_onboarding(_args=None):
     return {
         "mode": "llm_multiturn_onboarding",
         "questions": [
+            # --- CONTEXT ---
             {
                 "key": "name",
                 "question": "What’s your name? (optional — you can say 'skip')",
@@ -24,43 +26,67 @@ def tool_onboarding(_args=None):
             },
             {
                 "key": "age_range",
-                "question": "What’s your age range? (e.g., 18–24, 25–34, 35–44)",
+                "question": "What’s your age range?",
                 "optional": False,
             },
             {
                 "key": "stay_length",
-                "question": "How long will you stay in the UK? (e.g., 6 months, 1 year, 2 years)",
+                "question": "How long will you stay in the UK?",
                 "optional": False,
             },
             {
                 "key": "postcode",
-                "question": "What’s your London postcode / area? (e.g., NW1, W1H, E14)",
+                "question": "What’s your London postcode / area?",
                 "optional": False,
             },
             {
                 "key": "ihs_paid",
-                "question": "Have you paid the Immigration Health Surcharge (IHS)? (yes / no / not sure)",
+                "question": "Have you paid the Immigration Health Surcharge (IHS)?",
                 "optional": False,
-                "allowed": ["yes", "no", "not sure"],
             },
             {
                 "key": "gp_registered",
-                "question": "Do you already have a registered GP in the UK? (yes / no / not sure)",
+                "question": "Do you already have a registered GP in the UK?",
                 "optional": False,
-                "allowed": ["yes", "no", "not sure"],
             },
             {
                 "key": "conditions",
                 "question": "Any long-term health conditions you'd like me to be aware of? (optional — 'skip')",
                 "optional": True,
             },
+            # --- MEDICAL ---
+            {
+                "key": "medications",
+                "question": "Do you take any regular medications or receive ongoing treatment? (optional — 'skip')",
+                "optional": True,
+            },
+            # --- LIFESTYLE ---
+            {
+                "key": "lifestyle_focus",
+                "question": "Is there any lifestyle area you want to improve while in the UK?",
+                "optional": False,
+            },
+            # --- MENTAL HEALTH ---
+            {
+                "key": "mental_wellbeing",
+                "question": "How has your mental wellbeing been recently? (optional — 'skip')",
+                "optional": True,
+            },
         ],
         "instructions_to_llm": (
-            "You (the assistant) must run onboarding as a multi-turn Q&A. "
-            "Ask exactly one question at a time in the given order. "
-            "Wait for the user's answer before moving on. "
-            "If optional and user says skip, store null. "
-            "If allowed options exist, reprompt until valid. "
+            "You (the assistant) must run onboarding as a strict multi-turn Q&A.\n\n"
+            "CRITICAL RULES:\n"
+            "1) Ask ONLY the questions provided in the `questions` list.\n"
+            "2) Ask them in EXACT order.\n"
+            "3) Ask EXACTLY ONE question per turn.\n"
+            "4) Use the question text VERBATIM — do not rephrase, expand, or add examples.\n"
+            "5) Do NOT ask any extra questions (e.g., date of birth, phone number, email, gender, nationality, visas, etc.).\n"
+            "6) All answers are free text. Interpret/normalize internally if useful, but do not show options.\n"
+            "7) NEVER append the user's previous answer to the question line. "
+            "Each assistant turn during onboarding should contain ONLY the next question.\n"
+            "8) If the user goes off-topic mid-onboarding, say you’ll answer after onboarding and repeat the CURRENT question.\n"
+            "9) If optional and the user says 'skip', store null.\n"
+            "10) If the user gives an empty/unclear answer, gently reprompt ONCE with the same verbatim question.\n\n"
             "When finished, output the final profile ONLY as JSON wrapped in:\n"
             "<USER_PROFILE>{...}</USER_PROFILE>\n"
             "Then briefly confirm onboarding is complete."
@@ -92,10 +118,7 @@ RED_FLAG_KEYWORDS = [
 
 def safety_check(message):
     msg = message.lower()
-    for k in RED_FLAG_KEYWORDS:
-        if k in msg:
-            return True
-    return False
+    return any(k in msg for k in RED_FLAG_KEYWORDS)
 
 
 def emergency_response():
@@ -109,6 +132,9 @@ def emergency_response():
     )
 
 
+# ---------------------------------------------------------
+# Tools backed by OpenAI web_search_preview
+# ---------------------------------------------------------
 NHS_RESULTS_URLS = {
     "GP": "https://www.nhs.uk/service-search/find-a-gp/results/{pc}",
     "A&E": "https://www.nhs.uk/service-search/find-an-accident-and-emergency-service/results/{pc}",
@@ -120,11 +146,11 @@ def nearest_nhs_services(postcode_full: str, service_type: str, n: int = 3):
     Opens NHS service-search results page and returns nearest n options.
     Uses OpenAI hosted web tool (web_search_preview).
     """
-    st = service_type.upper().strip()
-    if st not in NHS_RESULTS_URLS:
+    stype = service_type.upper().strip()
+    if stype not in NHS_RESULTS_URLS:
         raise ValueError(f"Unsupported service_type: {service_type}")
 
-    url = NHS_RESULTS_URLS[st].format(pc=quote_plus(postcode_full.strip().upper()))
+    url = NHS_RESULTS_URLS[stype].format(pc=quote_plus(postcode_full.strip().upper()))
 
     prompt = f"""
 Open the NHS results page and extract the nearest {n} services.
@@ -141,16 +167,167 @@ The page is already nearest-first; take the top results.
 """
 
     resp = client.responses.create(
-        model="gpt-4o",  # web_search_preview is supported on tool-capable models :contentReference[oaicite:0]{index=0}
+        model="gpt-4o",
         tools=[{"type": "web_search_preview"}],
         input=prompt,
     )
 
-    text = resp.output_text.strip()
+    text = (resp.output_text or "").strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         return {"raw": text, "url": url}
+
+
+ALLOWED_DOMAINS = [
+    "gov.uk",
+    "nhs.uk",
+    "111.nhs.uk",
+    "england.nhs.uk",
+    "bartshealth.nhs.uk",
+    "ukcisa.org.uk",
+    "london.edu",
+    "talkcampus.com",
+]
+
+
+def guided_search(args, max_results_default: int = 5):
+    """
+    Allowlist-first retrieval using ONLY OpenAI web_search_preview.
+    """
+    if isinstance(args, dict):
+        query = args.get("query", "") or args.get("q", "")
+        max_results = int(args.get("max_results", max_results_default) or max_results_default)
+    else:
+        query = str(args)
+        max_results = max_results_default
+
+    query = query.strip()
+    if not query:
+        return {"context": "", "sources": [], "fallback_used": False}
+
+    def _has_allowlisted_domain(text: str) -> bool:
+        lower_text = text.lower()
+        return any(d in lower_text for d in ALLOWED_DOMAINS)
+
+    site_filter = " OR ".join([f"site:{d}" for d in ALLOWED_DOMAINS])
+    restricted_query = (
+        f"({query}) ({site_filter}). "
+        f"Prefer answers from these sites only. Return up to {max_results} relevant results with citations."
+    )
+
+    restricted_resp = client.responses.create(
+        model="gpt-4o-mini",
+        input=restricted_query,
+        tools=[{"type": "web_search_preview"}],
+        tool_choice={"type": "web_search_preview"},
+        max_output_tokens=1200,
+    )
+
+    restricted_text = restricted_resp.output_text or ""
+    restricted_sources = []
+
+    too_short = len(restricted_text.strip()) < 200
+    no_allowlisted_cites = not _has_allowlisted_domain(restricted_text)
+
+    if not (too_short or no_allowlisted_cites):
+        return {
+            "context": restricted_text,
+            "sources": restricted_sources,
+            "fallback_used": False,
+        }
+
+    broad_query = f"{query}. Return up to {max_results} relevant results with citations."
+
+    broad_resp = client.responses.create(
+        model="gpt-4o-mini",
+        input=broad_query,
+        tools=[{"type": "web_search_preview"}],
+        tool_choice={"type": "web_search_preview"},
+        max_output_tokens=1200,
+    )
+
+    return {
+        "context": broad_resp.output_text or "",
+        "sources": [],
+        "fallback_used": True,
+    }
+
+
+def nhs_111_live_triage(args):
+    """
+    Lightweight LLM-led triage + routing for NHS 111.
+    Returns either follow-up questions (need_more_info) or a final routing decision.
+    """
+    presenting_issue = args.get("presenting_issue")
+    postcode_full = args.get("postcode_full")
+    known_answers = args.get("known_answers", {}) or {}
+
+    prompt = f"""
+You are NHS 101, a lightweight triage router for international students. NON-DIAGNOSTIC.
+
+Goal:
+- Ask only what you need to decide the most appropriate NHS service.
+- Emergency red flags override everything.
+- Use known_answers to avoid repeating questions.
+
+Emergency red flags (ANY => emergency / A&E / 999):
+- severe chest pain, trouble breathing, blue lips
+- heavy bleeding that won’t stop
+- stroke signs (face droop, arm weakness, speech trouble)
+- seizure / fainting / unconsciousness
+- sudden severe allergic reaction
+- immediate danger / unsafe mental state / suicidal intent
+
+You must return STRICT JSON in ONE of these two forms:
+
+FORM A (need more info):
+{{
+  "status": "need_more_info",
+  "follow_up_questions": ["Q1", "Q2", "Q3"],
+  "known_answers_update": {{}}
+}}
+
+FORM B (final):
+{{
+  "status": "final",
+  "severity_level": "low|medium|high|emergency",
+  "suggested_service": "A&E|GP|NHS_111|PHARMACY_SELFCARE|MENTAL_HEALTH_CRISIS",
+  "rationale": "1–2 sentences",
+  "postcode_full": "{postcode_full}",
+  "should_lookup": true|false
+}}
+
+Inputs:
+- presenting_issue: {presenting_issue}
+- known_answers: {json.dumps(known_answers)}
+
+Rules:
+- If any red flag is present from presenting_issue or known_answers, return FORM B with:
+  severity_level="emergency" and suggested_service="A&E".
+- Otherwise, ask 1–3 short follow-up questions IF needed.
+  Examples of useful follow-ups:
+  • severity 0–10
+  • ability to function / walk / eat / breathe normally
+  • rapid onset vs gradual
+  • visible deformity, numbness, heavy swelling (injury)
+  • self-harm thoughts / safety now (mental health)
+- Keep questions crisp, one-line, no preamble.
+- Only return FORM B once enough info is available.
+
+Routing guidance:
+- emergency/high + red flags or very severe rapid onset => A&E
+- moderate symptoms, unsure urgency => NHS_111
+- moderate/persistent but stable => GP
+- mild + functioning OK => PHARMACY_SELFCARE
+- mental health safety risk => MENTAL_HEALTH_CRISIS
+
+should_lookup = true ONLY if:
+- suggested_service is "GP" or "A&E"
+- AND postcode_full is provided in inputs.
+"""
+
+    return {"prompt": prompt}
 
 
 tools = [
@@ -191,8 +368,64 @@ tools = [
     {
         "type": "function",
         "name": "onboarding",
-        "description": "Collect or refresh the user's profile (age range, stay length, postcode, IHS status, GP registration, conditions) so guidance can be personalised.",
+        "description": (
+            "Collect or refresh the user's profile so guidance can be personalised."
+        ),
         "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "guided_search",
+        "description": (
+            "Search approved NHS/LBS sites first using OpenAI Web Search. "
+            "If nothing relevant is found, run a general OpenAI Web Search fallback. "
+            "Never scrape manually."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "max_results": {"type": "integer", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "nhs_111_live_triage",
+        "description": (
+            "Lightweight triage + routing via live navigation of https://111.nhs.uk/ "
+            "using OpenAI's web viewing/computer-use capability. "
+            "Returns a structured routing result and a flag to chain to nearest_nhs_services "
+            "when GP or A&E is recommended and full postcode is provided."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "presenting_issue": {
+                    "type": "string",
+                    "description": "User’s symptom or concern in natural language.",
+                },
+                "postcode_full": {
+                    "type": "string",
+                    "description": (
+                        "Optional full UK postcode (e.g., 'NW1 2BU'). "
+                        "If provided and 111 recommends GP or A&E, the agent should chain "
+                        "to nearest_nhs_services."
+                    ),
+                },
+                "known_answers": {
+                    "type": "object",
+                    "description": (
+                        "Free-form key/value store of answers already collected "
+                        "(e.g., {'severity_0_10': 6, 'red_flags': 'no'}). "
+                        "Use to skip redundant questions on 111 where possible."
+                    ),
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["presenting_issue"],
+        },
     },
 ]
 
@@ -205,5 +438,5 @@ def tool_nearest_nhs_services(args):
     )
 
 
-def tool_safety(args):
+def tool_safety(_args):
     return emergency_response()
