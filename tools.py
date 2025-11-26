@@ -10,6 +10,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 
+
+
+
 def tool_onboarding(_args=None):
     """
     LLM-driven onboarding initializer.
@@ -19,80 +22,40 @@ def tool_onboarding(_args=None):
         "mode": "llm_multiturn_onboarding",
         "questions": [
             # --- CONTEXT ---
-            {
-                "key": "name",
-                "question": "What’s your name? (optional — you can say 'skip')",
-                "optional": True,
-            },
-            {
-                "key": "age_range",
-                "question": "What’s your age range?",
-                "optional": False,
-            },
-            {
-                "key": "stay_length",
-                "question": "How long will you stay in the UK?",
-                "optional": False,
-            },
-            {
-                "key": "postcode",
-                "question": "What’s your London postcode / area?",
-                "optional": False,
-            },
-            {
-                "key": "ihs_paid",
-                "question": "Have you paid the Immigration Health Surcharge (IHS)?",
-                "optional": False,
-            },
-            {
-                "key": "gp_registered",
-                "question": "Do you already have a registered GP in the UK?",
-                "optional": False,
-            },
-            {
-                "key": "conditions",
-                "question": "Any long-term health conditions you'd like me to be aware of? (optional — 'skip')",
-                "optional": True,
-            },
+            {"key": "name", "question": "What's your name? (optional - you can say 'skip')", "optional": True},
+            {"key": "age_range", "question": "What's your age range?", "optional": False},
+            {"key": "stay_length", "question": "How long will you stay in the UK?", "optional": False},
+            {"key": "postcode", "question": "What's your London postcode / area?", "optional": False},
+            {"key": "ihs_paid", "question": "Have you paid the Immigration Health Surcharge (IHS)?", "optional": False},
+            {"key": "gp_registered", "question": "Do you already have a registered GP in the UK?", "optional": False},
+            {"key": "conditions", "question": "Any long-term health conditions you'd like me to be aware of? (optional - say 'skip')", "optional": True},
             # --- MEDICAL ---
-            {
-                "key": "medications",
-                "question": "Do you take any regular medications or receive ongoing treatment? (optional — 'skip')",
-                "optional": True,
-            },
+            {"key": "medications", "question": "Do you take any regular medications or receive ongoing treatment? (optional - say 'skip')", "optional": True},
             # --- LIFESTYLE ---
-            {
-                "key": "lifestyle_focus",
-                "question": "Is there any lifestyle area you want to improve while in the UK?",
-                "optional": False,
-            },
+            {"key": "lifestyle_focus", "question": "Is there any lifestyle area you want to improve while in the UK?", "optional": False},
             # --- MENTAL HEALTH ---
-            {
-                "key": "mental_wellbeing",
-                "question": "How has your mental wellbeing been recently? (optional — 'skip')",
-                "optional": True,
-            },
+            {"key": "mental_wellbeing", "question": "How has your mental wellbeing been recently? (optional - say 'skip')", "optional": True},
         ],
-        "instructions_to_llm": (
-            "You (the assistant) must run onboarding as a strict multi-turn Q&A.\n\n"
-            "CRITICAL RULES:\n"
-            "1) Ask ONLY the questions provided in the `questions` list.\n"
-            "2) Ask them in EXACT order.\n"
-            "3) Ask EXACTLY ONE question per turn.\n"
-            "4) Use the question text VERBATIM — do not rephrase, expand, or add examples.\n"
-            "5) Do NOT ask any extra questions (e.g., date of birth, phone number, email, gender, nationality, visas, etc.).\n"
-            "6) All answers are free text. Interpret/normalize internally if useful, but do not show options.\n"
-            "7) NEVER append the user's previous answer to the question line. "
-            "Each assistant turn during onboarding should contain ONLY the next question.\n"
-            "8) If the user goes off-topic mid-onboarding, say you’ll answer after onboarding and repeat the CURRENT question.\n"
-            "9) If optional and the user says 'skip', store null.\n"
-            "10) If the user gives an empty/unclear answer, gently reprompt ONCE with the same verbatim question.\n\n"
-            "When finished, output the final profile ONLY as JSON wrapped in:\n"
-            "<USER_PROFILE>{...}</USER_PROFILE>\n"
-            "Then briefly confirm onboarding is complete."
-        ),
-    }
+        "instructions_to_llm": """
+You (the assistant) must run onboarding as a strict multi-turn Q&A.
 
+CRITICAL RULES:
+1) Ask ONLY the questions provided in the `questions` list.
+2) Ask them in EXACT order.
+3) Ask EXACTLY ONE question per turn.
+4) Use the question text VERBATIM - do not rephrase, expand, or add examples.
+5) Do NOT ask any extra questions (e.g., date of birth, phone number, email, gender, nationality, visas, etc.).
+6) All answers are free text. Interpret/normalize internally if useful, but do not show options.
+7) NEVER append the user's previous answer to the question line. Each assistant turn during onboarding should contain ONLY the next question.
+8) If the user goes off-topic mid-onboarding, say you'll answer after onboarding and repeat the CURRENT question.
+9) If optional and the user says 'skip', store null.
+10) If the user gives an empty/unclear answer, gently reprompt ONCE with the same verbatim question.
+
+When finished, output the final profile ONLY as JSON wrapped in:
+<USER_PROFILE>{...}</USER_PROFILE>
+Then briefly confirm onboarding is complete.
+""",
+    }
 
 # ---------------------------------------------------------
 # Safety Classifier (Red-Flag Detection)
@@ -121,9 +84,13 @@ def safety_check(message):
     return any(k in msg for k in RED_FLAG_KEYWORDS)
 
 
+
+
+
+
 def emergency_response():
     return (
-        "🚨 **Important Safety Notice**\n"
+        "Important Safety Notice\n"
         "Your message includes symptoms that may be serious.\n\n"
         "**In the UK:**\n"
         "- Call **999** for emergencies.\n"
@@ -131,9 +98,9 @@ def emergency_response():
         "I can continue to provide general information once you're safe."
     )
 
-
 # ---------------------------------------------------------
 # Tools backed by OpenAI web_search_preview
+
 # ---------------------------------------------------------
 NHS_RESULTS_URLS = {
     "GP": "https://www.nhs.uk/service-search/find-a-gp/results/{pc}",

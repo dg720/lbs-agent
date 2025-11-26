@@ -71,6 +71,7 @@ class AgentSession:
 
         self.onboarding_active = False
         self.onboarding_spec: Optional[Dict[str, Any]] = None
+        self.onboarding_state: Optional[Dict[str, Any]] = None
 
         self.triage_active = False
         self.triage_known_answers: Dict[str, Any] = {}
@@ -101,6 +102,13 @@ class AgentSession:
         if isinstance(tool_result, dict) and tool_result.get("mode") == "llm_multiturn_onboarding":
             self.onboarding_active = True
             self.onboarding_spec = tool_result
+            self.onboarding_state = {
+                "questions": tool_result.get("questions", []),
+                "current_idx": 0,
+                "answers": {},
+                "expecting_answer": False,
+                "reprompted": False,
+            }
             self.triage_active = False
 
         # triage tracking
@@ -119,11 +127,110 @@ class AgentSession:
 
         return parsed
 
+    # -----------------------------
+    # ONBOARDING HELPERS
+    # -----------------------------
+    def _onboarding_current_question(self) -> Optional[Dict[str, Any]]:
+        if not self.onboarding_state:
+            return None
+        idx = self.onboarding_state.get("current_idx", 0)
+        questions = self.onboarding_state.get("questions") or []
+        if idx >= len(questions):
+            return None
+        return questions[idx]
+
+    def _prompt_next_onboarding_question(self) -> str:
+        question = self._onboarding_current_question()
+        if not question:
+            return self._finalize_onboarding_flow()
+        self.onboarding_state["expecting_answer"] = True
+        self.onboarding_state["reprompted"] = False
+        return question.get("question", "").strip()
+
+    def _normalize_onboarding_answer(self, raw: str):
+        text = (raw or "").strip()
+        if text == "":
+            return None, True
+        lowered = text.lower()
+        if lowered in {"skip", "prefer not to say", "n/a", "na"}:
+            return None, False
+        return text, False
+
+    def _finalize_onboarding_flow(self) -> str:
+        questions = self.onboarding_state.get("questions") if self.onboarding_state else []
+        answers = self.onboarding_state.get("answers") if self.onboarding_state else {}
+        profile = {q.get("key"): answers.get(q.get("key")) for q in (questions or [])}
+        profile_json = json.dumps(profile)
+        completion_note = "Onboarding is complete. I have saved these details for future chats."
+        return f"<USER_PROFILE>{profile_json}</USER_PROFILE>\n{completion_note}"
+
+    def _handle_onboarding_answer(self, user_input: str) -> str:
+        if not self.onboarding_state:
+            return "I hit a snag loading the onboarding questions. Please say 'onboarding' to restart."
+
+        question = self._onboarding_current_question()
+        if not question:
+            return self._finalize_onboarding_flow()
+
+        answer, was_empty = self._normalize_onboarding_answer(user_input)
+        if was_empty and not self.onboarding_state.get("reprompted", False):
+            self.onboarding_state["reprompted"] = True
+            self.onboarding_state["expecting_answer"] = True
+            return f"I did not catch that. {question.get('question', '').strip()}"
+
+        # store answer (None allowed for skips/empty after reprompt)
+        self.onboarding_state["answers"][question.get("key")] = answer
+        self.onboarding_state["current_idx"] += 1
+        self.onboarding_state["expecting_answer"] = False
+        self.onboarding_state["reprompted"] = False
+
+        # ask next question or finish
+        if self._onboarding_current_question():
+            return self._prompt_next_onboarding_question()
+        return self._finalize_onboarding_flow()
+
+    def _process_final_reply(self, agent_reply: str) -> str:
+        clean_reply = strip_profile_tag(agent_reply)
+        self.conversation_history.append({"role": "assistant", "content": clean_reply})
+
+        maybe_profile = extract_profile(agent_reply)
+        if maybe_profile:
+            self.user_profile = maybe_profile
+            self.system_prompt = build_system_prompt(self.user_profile)
+
+            # reset modes
+            self.onboarding_active = False
+            self.onboarding_spec = None
+            self.onboarding_state = None
+            self.triage_active = False
+            self.triage_known_answers = {}
+
+            self.conversation_history.append(
+                {
+                    "role": "system",
+                    "content": f"Updated user profile for memory:\n{self.user_profile}",
+                }
+            )
+
+        return clean_reply
+
     def step(self, user_input: str) -> str:
         """
         Process a single user turn and return the assistant reply (profile tags stripped).
         """
         self.conversation_history.append({"role": "user", "content": user_input})
+
+        # -------------------------------
+        # SHORT-CIRCUIT: ACTIVE ONBOARDING
+        # -------------------------------
+        if self.onboarding_active and self.onboarding_state:
+            # If we have not yet asked the first question, do so now.
+            if not self.onboarding_state.get("expecting_answer", False) and self.onboarding_state.get("current_idx", 0) == 0:
+                reply = self._prompt_next_onboarding_question()
+                return self._process_final_reply(reply)
+
+            reply = self._handle_onboarding_answer(user_input)
+            return self._process_final_reply(reply)
 
         # -------------------------------
         # PINNED CONTEXT (short!)
@@ -230,6 +337,10 @@ class AgentSession:
                 max_output_tokens=self.MAX_OUT,
             )
 
+            # If onboarding just became active, break early and handle questions deterministically.
+            if self.onboarding_active and self.onboarding_state:
+                break
+
         # -------------------------------
         # FINAL TEXT RESPONSE
         # -------------------------------
@@ -283,30 +394,11 @@ class AgentSession:
             )
             agent_reply = forced.output_text or ""
 
-        clean_reply = strip_profile_tag(agent_reply)
+        # Onboarding deterministic hand-off after tool activation
+        if self.onboarding_active and self.onboarding_state:
+            agent_reply = self._prompt_next_onboarding_question()
 
-        self.conversation_history.append({"role": "assistant", "content": clean_reply})
-
-        # PROFILE EXTRACTION
-        maybe_profile = extract_profile(agent_reply)
-        if maybe_profile:
-            self.user_profile = maybe_profile
-            self.system_prompt = build_system_prompt(self.user_profile)
-
-            # reset modes
-            self.onboarding_active = False
-            self.onboarding_spec = None
-            self.triage_active = False
-            self.triage_known_answers = {}
-
-            self.conversation_history.append(
-                {
-                    "role": "system",
-                    "content": f"Updated user profile for memory:\n{self.user_profile}",
-                }
-            )
-
-        return clean_reply
+        return self._process_final_reply(agent_reply)
 
 
 def run_cli():
