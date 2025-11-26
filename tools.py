@@ -253,7 +253,7 @@ You must return STRICT JSON in ONE of these two forms:
 FORM A (need more info):
 {{
   "status": "need_more_info",
-  "follow_up_questions": ["Q1", "Q2", "Q3"],
+  "follow_up_questions": ["ONLY_ONE_QUESTION"],
   "known_answers_update": {{}}
 }}
 
@@ -274,8 +274,8 @@ Inputs:
 Rules:
 - If any red flag is present from presenting_issue or known_answers, return FORM B with:
   severity_level="emergency" and suggested_service="A&E".
-- Otherwise, ask 1–3 short follow-up questions IF needed.
-  Examples of useful follow-ups:
+- Otherwise, ask at most ONE short follow-up question IF needed (never more than one).
+  Examples of useful follow-ups (pick ONE):
   • severity 0–10
   • ability to function / walk / eat / breathe normally
   • rapid onset vs gradual
