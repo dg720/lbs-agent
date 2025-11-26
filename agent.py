@@ -229,57 +229,96 @@ class AgentSession:
         if "Useful links" not in agent_reply:
             return agent_reply
 
-        additions = []
         lower = agent_reply.lower()
+        catalog = [
+            {
+                "keywords": {"register", "gp"},
+                "title": "Register with a GP",
+                "url": "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/",
+            },
+            {
+                "keywords": {"find", "gp"},
+                "title": "Find a GP",
+                "url": "https://www.nhs.uk/service-search/find-a-gp",
+            },
+            {"keywords": {"111"}, "title": "Use NHS 111 online", "url": "https://111.nhs.uk/"},
+        ]
 
-        def add_if(keyword_substrs, title, url):
-            if all(k in lower for k in keyword_substrs) and url not in agent_reply:
-                additions.append(f"- {title}: {url}")
-
-        add_if(["register", "gp"], "Register with a GP", "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/")
-        add_if(["find", "gp"], "Find a GP", "https://www.nhs.uk/service-search/find-a-gp")
-        add_if(["111"], "Use NHS 111 online", "https://111.nhs.uk/")
-
-        if not additions:
-            return agent_reply
+        def extract_section(lines):
+            start = None
+            for idx, line in enumerate(lines):
+                if line.strip().lower().startswith("useful links"):
+                    start = idx
+                    break
+            if start is None:
+                return None, []
+            section = []
+            for line in lines[start + 1 :]:
+                if line.strip() == "":
+                    break
+                section.append(line)
+            return start, section
 
         lines = agent_reply.splitlines()
-        new_lines = []
-        inserted = False
-        for line in lines:
-            new_lines.append(line)
-            if not inserted and line.strip().startswith("Useful links"):
-                new_lines.extend(additions)
-                inserted = True
-        if not inserted:
-            new_lines.extend(["Useful links", *additions])
+        start_idx, existing_section = extract_section(lines)
+        if start_idx is None:
+            return agent_reply
 
-        # Deduplicate links (by URL) and ensure only one "Useful links" header
-        deduped_lines = []
+        selected_links = []
         seen_urls = set()
-        header_seen = False
-        for line in new_lines:
-            stripped = line.strip()
-            if stripped.lower().startswith("useful links"):
-                if header_seen:
-                    continue
-                header_seen = True
-                deduped_lines.append(line)
-                continue
-            # crude URL grab
+
+        def clean_title(raw: str, url: str) -> str:
+            title = raw.replace("Title:", "").replace("title:", "")
+            title = title.strip("-•*: \u2022").strip()
+            title = title.rstrip(":").strip()
+            return title or url
+
+        def add_link(title: str, url: str):
+            if url in seen_urls:
+                return
+            seen_urls.add(url)
+            selected_links.append((clean_title(title, url), url))
+
+        for entry in catalog:
+            if all(k in lower for k in entry["keywords"]) or entry["url"] in agent_reply:
+                add_link(entry["title"], entry["url"])
+
+        for line in existing_section:
             url = None
-            parts = stripped.split()
-            for part in parts:
+            for part in line.split():
                 if part.startswith("http://") or part.startswith("https://"):
                     url = part.rstrip(".,);")
                     break
-            if url:
-                if url in seen_urls:
-                    continue
-                seen_urls.add(url)
-            deduped_lines.append(line)
+            if not url:
+                continue
+            title_hint = line.split("http")[0]
+            title = title_hint if title_hint else url
+            add_link(title, url)
 
-        return "\n".join(deduped_lines)
+        if not selected_links:
+            return agent_reply
+
+        # Keep the section focused; show at most three links.
+        pruned_links = selected_links[:3]
+        new_section = ["Useful links", *[f"- {title}: {url}" for title, url in pruned_links]]
+
+        rebuilt = []
+        idx = 0
+        replaced = False
+        while idx < len(lines):
+            line = lines[idx]
+            if not replaced and line.strip().lower().startswith("useful links"):
+                # skip old section
+                idx += 1
+                while idx < len(lines) and lines[idx].strip() != "":
+                    idx += 1
+                rebuilt.extend(new_section)
+                replaced = True
+                continue
+            rebuilt.append(line)
+            idx += 1
+
+        return "\n".join(rebuilt)
 
     def _profile_followups(self) -> str:
         if not self.user_profile:
