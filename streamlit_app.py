@@ -160,7 +160,7 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.caption("Build marker: Streamlit app refreshed (ping #5).")
+    st.caption("Build marker: Streamlit app refreshed (ping #6).")
 
     st.markdown(
         f'<div class="evi-card"><strong>How I can help</strong><br>{intro_prompt}</div>',

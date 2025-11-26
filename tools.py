@@ -287,10 +287,16 @@ Rules:
   - rapid onset vs gradual / time course
   - ability to function normally (walk/use/weight-bear/breathe/eat)
   - visible deformity, numbness, heavy swelling, heat/redness, locking/clicking, instability/buckling (MSK)
-  - clear mechanism of injury or recent trigger (fall, twist, overuse)
-  - mental health safety: self-harm thoughts / unsafe now
+- clear mechanism of injury or recent trigger (fall, twist, overuse)
+- mental health safety: self-harm thoughts / unsafe now
 - Keep questions crisp, one-line, no preamble.
 - Only return FORM B once enough info is available.
+
+Browser instructions (web_search_preview):
+- Open https://111.nhs.uk/ and follow the relevant triage path based on presenting_issue.
+- Mirror the site prompts with very short single questions; do NOT add extra fluff.
+- Stop browsing once you have enough to suggest a service (A&E/999, NHS 111, GP, pharmacy/self-care, mental health crisis).
+- If the site flow is unclear or tool fails, fall back to your best judgment using the rules above.
 
 Routing guidance:
 - emergency/high + red flags or very severe rapid onset => A&E
@@ -304,9 +310,11 @@ should_lookup = true ONLY if:
 - AND postcode_full is provided in inputs.
 """
     resp = client.responses.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         input=prompt,
-        max_output_tokens=500,
+        tools=[{"type": "web_search_preview"}],
+        tool_choice="auto",
+        max_output_tokens=700,
     )
 
     raw = resp.output_text or ""
