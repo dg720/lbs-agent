@@ -8,7 +8,10 @@ from prompts import intro_prompt
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Prefer Streamlit secrets for cloud deploy, fall back to env/local .env
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+if OPENAI_API_KEY:
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 
 def ensure_state() -> AgentSession:

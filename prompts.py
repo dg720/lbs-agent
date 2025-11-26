@@ -1,6 +1,5 @@
 # --- System Prompt for the Agent (LLM chooses tools) ---
 def build_system_prompt(profile):
-    
     return f"""
 You are NHS 101, a healthcare navigation assistant for London Business School students.
 
@@ -93,15 +92,14 @@ Important:
 """.strip()
 
 
-
 # --- Intro Prompt shown to user (NOT a tool trigger) ---
 intro_prompt = """
-Hi there, welcome to London and to the LBS Community! My name is Evi - Your LBS Healthcare Companion.
+Hi there, welcome to the LBS Community! My name is Evi - Your LBS Healthcare Companion.
 
 Now that you've made it to London, I'm sure you have a lot of questions about navigating the NHS and LBS wellbeing services.
 Feel free to start with one of the examples below to get you oriented.
 
-- Better understand when and how to use all the services provided by the NHS (GP, NHS 111, A&E, and more!)
+- Better understand when and how to use NHS services (GP, NHS 111, A&E, and more!)
 - Locate mental health or wellbeing support
 - Get more information about preventative-care guidance
 

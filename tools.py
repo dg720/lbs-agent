@@ -26,7 +26,7 @@ def tool_onboarding(_args=None):
             {"key": "age_range", "question": "What's your age range?", "optional": False},
             {"key": "stay_length", "question": "How long will you stay in the UK?", "optional": False},
             {"key": "postcode", "question": "What's your London postcode / area?", "optional": False},
-            {"key": "ihs_paid", "question": "Have you paid the Immigration Health Surcharge (IHS)?", "optional": False},
+            {"key": "visa_status", "question": "Do you hold a UK visa/status (e.g., student, work, settled, visitor)?", "optional": False},
             {"key": "gp_registered", "question": "Do you already have a registered GP in the UK?", "optional": False},
             {"key": "conditions", "question": "Any long-term health conditions you'd like me to be aware of? (optional - say 'skip')", "optional": True},
             # --- MEDICAL ---

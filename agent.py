@@ -75,6 +75,7 @@ class AgentSession:
 
         self.triage_active = False
         self.triage_known_answers: Dict[str, Any] = {}
+        self.triage_state: Optional[Dict[str, Any]] = None
 
         self.prompt_suggestions: List[str] = []
 
@@ -164,7 +165,140 @@ class AgentSession:
         profile = {q.get("key"): answers.get(q.get("key")) for q in (questions or [])}
         profile_json = json.dumps(profile)
         completion_note = "Onboarding is complete. I have saved these details for future chats."
-        return f"<USER_PROFILE>{profile_json}</USER_PROFILE>\n{completion_note}"
+        eligibility = self._eligibility_summary_from_profile(profile)
+        summary = f"{completion_note}\n\n{eligibility}" if eligibility else completion_note
+        return f"<USER_PROFILE>{profile_json}</USER_PROFILE>\n{summary}"
+
+    def _eligibility_summary_from_profile(self, profile: Dict[str, Any]) -> str:
+        stay = (profile.get("stay_length") or "").lower()
+        visa = (profile.get("visa_status") or "").lower()
+        postcode = profile.get("postcode") or ""
+        gp_registered = str(profile.get("gp_registered") or "").lower()
+
+        long_stay = any(k in stay for k in ["year", "yr", "6", "twelve", "12", "long", "permanent", "settled"])
+        has_uk_status = any(k in visa for k in ["student", "work", "skilled", "settled", "ilr", "british", "uk"])
+        has_address = bool(postcode.strip())
+
+        gp_line = (
+            "Likely eligible to register with a GP (typical for stays ~6+ months). "
+            "Use your UK address/postcode; bring ID and proof of address if asked."
+            if long_stay or has_uk_status
+            else "May be asked about length of stay for GP registration; urgent/111/A&E are still available."
+        )
+        urgent_line = "Urgent and emergency care (NHS 111, A&E) are available regardless of GP registration."
+        registered_note = "You already have a GP registered." if "yes" in gp_registered else ""
+        location_note = f"Postcode on file: {postcode}" if postcode else ""
+
+        return "\n".join(
+            [
+                "Based on your details, here are likely options:",
+                f"- {gp_line}",
+                f"- {urgent_line}",
+                f"- {registered_note}".strip(" -"),
+                f"- {location_note}".strip(" -"),
+                "If you'd like, I can look up nearby GP practices or urgent care options.",
+            ]
+        )
+
+    # -----------------------------
+    # TRIAGE HELPERS (codified)
+    # -----------------------------
+    def _start_triage_flow(self) -> str:
+        self.triage_state = {
+            "questions": [
+                ("severity", "On a scale of 0 to 10, how severe are your symptoms right now?"),
+                ("fluids", "Have you been able to keep down food or fluids in the last 12 hours?"),
+                ("onset", "When did the symptoms start (time or days ago)?"),
+                (
+                    "red_flags",
+                    "Do you have any of these: chest pain, difficulty breathing, heavy bleeding, "
+                    "sudden weakness/numbness, or a seizure in the last 24 hours?",
+                ),
+                ("other", "Any fever, rash, severe headache, pregnancy, or long-term conditions affecting immunity?"),
+            ],
+            "answers": {},
+            "idx": 0,
+        }
+        self.triage_active = True
+        return "I'll follow NHS 111 style triage. Please answer a few quick questions so I can route you correctly."
+
+    def _triage_next_question(self) -> Optional[str]:
+        if not self.triage_state:
+            return None
+        idx = self.triage_state.get("idx", 0)
+        qs = self.triage_state.get("questions", [])
+        if idx >= len(qs):
+            return None
+        return qs[idx][1]
+
+    def _triage_record_answer(self, user_input: str) -> None:
+        if not self.triage_state:
+            return
+        idx = self.triage_state.get("idx", 0)
+        qs = self.triage_state.get("questions", [])
+        if idx >= len(qs):
+            return
+        key = qs[idx][0]
+        self.triage_state["answers"][key] = user_input.strip()
+        self.triage_state["idx"] = idx + 1
+
+    def _triage_summary(self) -> str:
+        answers = (self.triage_state or {}).get("answers", {})
+        severity = answers.get("severity", "")
+        fluids = answers.get("fluids", "").lower()
+        red_flags = answers.get("red_flags", "").lower()
+        onset = answers.get("onset", "")
+        other = answers.get("other", "")
+        postcode = (self.user_profile or {}).get("postcode") or ""
+
+        def has_yes(text):
+            return any(token in text for token in ["yes", "y", "true", "1"])
+
+        red_flagged = has_yes(red_flags)
+        severe = False
+        try:
+            severe = float(severity) >= 8
+        except Exception:
+            severe = False
+        dehydrated = any(k in fluids for k in ["no", "not", "can't", "cannot", "unable"])
+
+        if red_flagged:
+            recommended_service = "A&E"
+            route = (
+                "This sounds like a red-flag situation. NHS 111 guidance is to call 999 or go to A&E if safe to travel. "
+                "If you're unsure, contact NHS 111 immediately for clinical advice."
+            )
+        elif severe or dehydrated:
+            recommended_service = "A&E"
+            route = (
+                "NHS 111 would typically advise urgent clinical review. Please contact NHS 111 now. "
+                "They may direct you to urgent care/A&E if warranted."
+            )
+        else:
+            recommended_service = "GP"
+            route = (
+                "You likely need non-emergency care. NHS 111 would usually suggest: "
+                "register/contact your GP for review, and use NHS 111 online if symptoms change or worsen. "
+                "If new severe symptoms arise, call 111 or 999 as appropriate."
+            )
+
+        postcode_note = (
+            f"I can find the nearest {recommended_service} options using your postcode on record ({postcode})."
+            if postcode
+            else f"I can look up the nearest {recommended_service} options if you share your postcode."
+        )
+
+        summary = (
+            "Thanks, here's a quick triage summary (following NHS 111 style steps):\n"
+            f"- Severity: {severity or 'not given'}\n"
+            f"- Fluids: {answers.get('fluids', 'not given')}\n"
+            f"- Onset: {onset or 'not given'}\n"
+            f"- Red flags: {answers.get('red_flags', 'not given')}\n"
+            f"- Other: {other or 'not given'}\n\n"
+            f"{route}\n"
+            f"{postcode_note} If you want, I can also help with GP registration or local services."
+        )
+        return summary
 
     def _handle_onboarding_answer(self, user_input: str) -> str:
         if not self.onboarding_state:
@@ -229,78 +363,20 @@ class AgentSession:
         if "Useful links" not in agent_reply:
             return agent_reply
 
-        lower = agent_reply.lower()
-        catalog = [
-            {
-                "keywords": {"register", "gp"},
-                "title": "Register with a GP",
-                "url": "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/",
-            },
-            {
-                "keywords": {"find", "gp"},
-                "title": "Find a GP",
-                "url": "https://www.nhs.uk/service-search/find-a-gp",
-            },
-            {"keywords": {"111"}, "title": "Use NHS 111 online", "url": "https://111.nhs.uk/"},
+        lines = agent_reply.splitlines()
+        if not any(line.strip().lower().startswith("useful links") for line in lines):
+            return agent_reply
+
+        canonical_links = [
+            ("Find a GP", "https://www.nhs.uk/service-search/find-a-gp"),
+            ("Register with a GP", "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/"),
+            ("Use NHS 111 online", "https://111.nhs.uk/"),
+            ("NHS services guide", "https://www.nhs.uk/using-the-nhs/nhs-services/"),
+            ("LBS health and wellbeing", "https://www.london.edu/masters-experience/student-support"),
+            ("LBS mental wellbeing support", "https://www.london.edu/masters-experience/student-support/mental-health"),
         ]
 
-        def extract_section(lines):
-            start = None
-            for idx, line in enumerate(lines):
-                if line.strip().lower().startswith("useful links"):
-                    start = idx
-                    break
-            if start is None:
-                return None, []
-            section = []
-            for line in lines[start + 1 :]:
-                if line.strip() == "":
-                    break
-                section.append(line)
-            return start, section
-
-        lines = agent_reply.splitlines()
-        start_idx, existing_section = extract_section(lines)
-        if start_idx is None:
-            return agent_reply
-
-        selected_links = []
-        seen_urls = set()
-
-        def clean_title(raw: str, url: str) -> str:
-            title = raw.replace("Title:", "").replace("title:", "")
-            title = title.strip("-•*: \u2022").strip()
-            title = title.rstrip(":").strip()
-            return title or url
-
-        def add_link(title: str, url: str):
-            if url in seen_urls:
-                return
-            seen_urls.add(url)
-            selected_links.append((clean_title(title, url), url))
-
-        for entry in catalog:
-            if all(k in lower for k in entry["keywords"]) or entry["url"] in agent_reply:
-                add_link(entry["title"], entry["url"])
-
-        for line in existing_section:
-            url = None
-            for part in line.split():
-                if part.startswith("http://") or part.startswith("https://"):
-                    url = part.rstrip(".,);")
-                    break
-            if not url:
-                continue
-            title_hint = line.split("http")[0]
-            title = title_hint if title_hint else url
-            add_link(title, url)
-
-        if not selected_links:
-            return agent_reply
-
-        # Keep the section focused; show at most three links.
-        pruned_links = selected_links[:3]
-        new_section = ["Useful links", *[f"- {title}: {url}" for title, url in pruned_links]]
+        new_section = ["Useful links", *[f"- {title}: {url}" for title, url in canonical_links]]
 
         rebuilt = []
         idx = 0
@@ -348,6 +424,21 @@ class AgentSession:
                 "If you want, I can look up nearby services based on your postcode."
             )
             return fallback
+
+    def _eligibility_response(self) -> str:
+        """
+        Deterministic, structured eligibility check with follow-up questions.
+        """
+        return (
+            "Here's a structured check for NHS service eligibility:\n\n"
+            "Key criteria:\n"
+            "1) Residency/visa: UK resident, settled status, or valid visa (e.g., student or work).\n"
+            "2) Location: Living within a UK postcode/catchment for local services (GP, urgent care).\n"
+            "3) Duration: Planning to stay 6+ months (typical for GP registration).\n"
+            "4) ID/proof: Ability to show ID plus address (e.g., bank statement/tenancy) if asked.\n"
+            "5) Visitors: Short-stay visitors may still access urgent or emergency care.\n\n"
+            "Want me to confirm with your details? I can start onboarding now to collect postcode, visa/status, UK stay length, and GP status, then I'll summarise what you're eligible for. Just say 'onboarding' to begin."
+        )
 
     def _generate_prompt_suggestions(self, last_reply: str) -> List[str]:
         prompt = (
@@ -397,6 +488,32 @@ class AgentSession:
                 return self._process_final_reply(reply)
 
             reply = self._handle_onboarding_answer(user_input)
+            return self._process_final_reply(reply)
+
+        # -------------------------------
+        # SHORT-CIRCUIT: DETERMINISTIC TRIAGE
+        # -------------------------------
+        lower_input = user_input.lower()
+        if self.triage_state:
+            self._triage_record_answer(user_input)
+            nxt = self._triage_next_question()
+            if nxt:
+                return self._process_final_reply(nxt)
+            summary = self._triage_summary()
+            self.triage_state = None
+            self.triage_active = False
+            return self._process_final_reply(summary)
+        elif "triage" in lower_input or "feeling" in lower_input or "symptom" in lower_input:
+            start_msg = self._start_triage_flow()
+            first_q = self._triage_next_question()
+            combined = f"{start_msg}\n\n{first_q}" if first_q else start_msg
+            return self._process_final_reply(combined)
+
+        # -------------------------------
+        # SHORT-CIRCUIT: ELIGIBILITY QUERY
+        # -------------------------------
+        if "eligible" in lower_input or "eligibility" in lower_input:
+            reply = self._eligibility_response()
             return self._process_final_reply(reply)
 
         # -------------------------------
