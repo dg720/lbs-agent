@@ -166,6 +166,16 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    suggestions = st.session_state.get("prompt_suggestions", [])
+    if not session.conversation_history and suggestions:
+        rows = [suggestions[i : i + 2] for i in range(0, len(suggestions), 2)]
+        for row in rows:
+            cols = st.columns(2, gap="medium")
+            for idx, suggestion in enumerate(row):
+                if cols[idx].button(suggestion, use_container_width=True):
+                    st.session_state.queued_message = suggestion
+                    st.session_state.prompt_suggestions = suggestions
+
     render_history(session)
 
     queued_message = st.session_state.pop("queued_message", None)
@@ -182,16 +192,6 @@ def main() -> None:
             st.session_state.prompt_suggestions = session.prompt_suggestions
         with st.chat_message("assistant"):
             st.markdown(reply)
-
-    suggestions = st.session_state.get("prompt_suggestions", [])
-    if not session.conversation_history and suggestions:
-        rows = [suggestions[i : i + 2] for i in range(0, len(suggestions), 2)]
-        for row in rows:
-            cols = st.columns(2, gap="medium")
-            for idx, suggestion in enumerate(row):
-                if cols[idx].button(suggestion, use_container_width=True):
-                    st.session_state.queued_message = suggestion
-                    st.session_state.prompt_suggestions = suggestions
 
 
 if __name__ == "__main__":
