@@ -519,7 +519,23 @@ class AgentSession:
             self.triage_state = None
             self.triage_active = False
             return self._process_final_reply(summary)
-        elif "triage" in lower_input or "feeling" in lower_input or "symptom" in lower_input:
+        else:
+            triage_triggers = {
+                "triage",
+                "feeling",
+                "symptom",
+                "pain",
+                "hurt",
+                "injury",
+                "sick",
+                "ill",
+                "fever",
+                "nausea",
+                "vomit",
+                "swelling",
+                "bleeding",
+            }
+        if not self.onboarding_active and any(tok in lower_input for tok in triage_triggers):
             start_msg = self._start_triage_flow()
             first_q = self._triage_next_question()
             combined = f"{start_msg}\n\n{first_q}" if first_q else start_msg
