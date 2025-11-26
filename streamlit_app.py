@@ -160,6 +160,7 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption("Build marker: refreshed Streamlit app to latest repository state.")
 
     st.markdown(
         f'<div class="evi-card"><strong>How I can help</strong><br>{intro_prompt}</div>',
