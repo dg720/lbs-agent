@@ -76,6 +76,8 @@ class AgentSession:
         self.triage_active = False
         self.triage_known_answers: Dict[str, Any] = {}
 
+        self.prompt_suggestions: List[str] = []
+
         self.HISTORY_WINDOW = 6
         self.MAX_OUT = 250
         self.MAX_TOOL_ROUNDS = 4
@@ -190,6 +192,7 @@ class AgentSession:
         return self._finalize_onboarding_flow()
 
     def _process_final_reply(self, agent_reply: str) -> str:
+        agent_reply = self._ensure_useful_links(agent_reply)
         clean_reply = strip_profile_tag(agent_reply)
         self.conversation_history.append({"role": "assistant", "content": clean_reply})
 
@@ -212,7 +215,132 @@ class AgentSession:
                 }
             )
 
+            follow_up = self._profile_followups()
+            if follow_up:
+                self.conversation_history.append({"role": "assistant", "content": follow_up})
+                clean_reply = clean_reply + "\n\n" + follow_up
+
         return clean_reply
+
+    def _ensure_useful_links(self, agent_reply: str) -> str:
+        """
+        Post-process assistant text to ensure common Useful links are concrete NHS URLs.
+        """
+        if "Useful links" not in agent_reply:
+            return agent_reply
+
+        additions = []
+        lower = agent_reply.lower()
+
+        def add_if(keyword_substrs, title, url):
+            if all(k in lower for k in keyword_substrs) and url not in agent_reply:
+                additions.append(f"- {title}: {url}")
+
+        add_if(["register", "gp"], "Register with a GP", "https://www.nhs.uk/nhs-services/gps/how-to-register-with-a-gp-surgery/")
+        add_if(["find", "gp"], "Find a GP", "https://www.nhs.uk/service-search/find-a-gp")
+        add_if(["111"], "Use NHS 111 online", "https://111.nhs.uk/")
+
+        if not additions:
+            return agent_reply
+
+        lines = agent_reply.splitlines()
+        new_lines = []
+        inserted = False
+        for line in lines:
+            new_lines.append(line)
+            if not inserted and line.strip().startswith("Useful links"):
+                new_lines.extend(additions)
+                inserted = True
+        if not inserted:
+            new_lines.extend(["Useful links", *additions])
+
+        # Deduplicate links (by URL) and ensure only one "Useful links" header
+        deduped_lines = []
+        seen_urls = set()
+        header_seen = False
+        for line in new_lines:
+            stripped = line.strip()
+            if stripped.lower().startswith("useful links"):
+                if header_seen:
+                    continue
+                header_seen = True
+                deduped_lines.append(line)
+                continue
+            # crude URL grab
+            url = None
+            parts = stripped.split()
+            for part in parts:
+                if part.startswith("http://") or part.startswith("https://"):
+                    url = part.rstrip(".,);")
+                    break
+            if url:
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+            deduped_lines.append(line)
+
+        return "\n".join(deduped_lines)
+
+    def _profile_followups(self) -> str:
+        if not self.user_profile:
+            return ""
+
+        prompt = (
+            "Using the profile below, propose 3-5 concise follow-up suggestions tailored to the user. "
+            "Keep it short (under ~120 words), use numbered bullets, and stay within wellbeing/health navigation "
+            "topics relevant to UK NHS care. Do NOT ask for onboarding details again. "
+            "End with a brief invitation to ask for help finding local services if relevant.\n\n"
+            f"User profile: {json.dumps(self.user_profile)}"
+        )
+
+        try:
+            resp = self.client.responses.create(
+                model="gpt-4o-mini",
+                input=prompt,
+                max_output_tokens=220,
+            )
+            return resp.output_text or ""
+        except Exception:
+            fallback = (
+                "Here are a few next steps you might find useful:\n"
+                "1) Find nearby GP practices and register.\n"
+                "2) Book a routine health check or vaccination if due.\n"
+                "3) Explore local mental wellbeing resources.\n"
+                "If you want, I can look up nearby services based on your postcode."
+            )
+            return fallback
+
+    def _generate_prompt_suggestions(self, last_reply: str) -> List[str]:
+        prompt = (
+            "Generate 3 short follow-up prompts the user might want to ask next. "
+            "Keep each under 80 characters. "
+            "Return ONLY a JSON list of strings. "
+            "Avoid duplicates. "
+            f"User profile: {json.dumps(self.user_profile)}. "
+            f"Last assistant reply: {last_reply}"
+        )
+        try:
+            resp = self.client.responses.create(
+                model="gpt-4o-mini",
+                input=prompt,
+                max_output_tokens=120,
+            )
+            raw = resp.output_text or "[]"
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                cleaned = [str(x).strip() for x in parsed if str(x).strip()]
+                if cleaned:
+                    return cleaned[:3]
+        except Exception:
+            pass
+
+        # Fallback generic suggestions if LLM parsing fails
+        fallback = [
+            "Find nearby GP or A&E",
+            "How to register with a GP",
+            "What to do for my symptoms now",
+        ]
+        return fallback
 
     def step(self, user_input: str) -> str:
         """
@@ -277,6 +405,7 @@ class AgentSession:
         triage_called_this_turn = False
         tool_rounds = 0
         bailed_with_unresolved_calls = False
+        triage_lookup_done = False
 
         # -------------------------------
         # BATCH TOOL HANDLING LOOP
@@ -316,7 +445,7 @@ class AgentSession:
                 if tool_name == "nhs_111_live_triage":
                     triage_called_this_turn = True
 
-                self._update_state_from_tool(tool_name, tool_result)
+                parsed_tool = self._update_state_from_tool(tool_name, tool_result)
 
                 tool_output_str = tool_result if isinstance(tool_result, str) else json.dumps(tool_result)
 
@@ -327,6 +456,35 @@ class AgentSession:
                         "output": tool_output_str,
                     }
                 )
+
+                # Auto-chain to nearest services when triage recommends GP or A&E and has a postcode.
+                if (
+                    tool_name == "nhs_111_live_triage"
+                    and not triage_lookup_done
+                    and isinstance(parsed_tool, dict)
+                    and parsed_tool.get("status") == "final"
+                    and parsed_tool.get("should_lookup")
+                    and parsed_tool.get("postcode_full")
+                    and parsed_tool.get("suggested_service") in {"GP", "A&E"}
+                ):
+                    try:
+                        lookup = tool_nearest_nhs_services(
+                            {
+                                "postcode_full": parsed_tool.get("postcode_full", ""),
+                                "service_type": parsed_tool.get("suggested_service"),
+                                "n": 3,
+                            }
+                        )
+                        outputs.append(
+                            {
+                                "type": "function_call_output",
+                                "call_id": f"{call_id}__nearest_services",
+                                "output": lookup if isinstance(lookup, str) else json.dumps(lookup),
+                            }
+                        )
+                        triage_lookup_done = True
+                    except Exception:
+                        pass
 
             final_response = self.safe_create(
                 model="gpt-4o-mini",
@@ -398,7 +556,9 @@ class AgentSession:
         if self.onboarding_active and self.onboarding_state:
             agent_reply = self._prompt_next_onboarding_question()
 
-        return self._process_final_reply(agent_reply)
+        clean = self._process_final_reply(agent_reply)
+        self.prompt_suggestions = self._generate_prompt_suggestions(clean)
+        return clean
 
 
 def run_cli():

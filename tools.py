@@ -293,8 +293,18 @@ should_lookup = true ONLY if:
 - suggested_service is "GP" or "A&E"
 - AND postcode_full is provided in inputs.
 """
+    resp = client.responses.create(
+        model="gpt-4o-mini",
+        input=prompt,
+        max_output_tokens=500,
+    )
 
-    return {"prompt": prompt}
+    raw = resp.output_text or ""
+    try:
+        parsed = json.loads(raw)
+        return parsed
+    except json.JSONDecodeError:
+        return {"raw": raw, "error": "Could not parse triage result as JSON"}
 
 
 tools = [
