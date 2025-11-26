@@ -85,7 +85,7 @@ class AgentSession:
 
         self.prompt_suggestions: List[str] = []
 
-        self.HISTORY_WINDOW = 6
+        self.HISTORY_WINDOW = 15
         self.MAX_OUT = 250
         self.MAX_TOOL_ROUNDS = 4
         self.MAX_RETRIES = 2
@@ -133,7 +133,7 @@ class AgentSession:
             if parsed.get("status") == "need_more_info":
                 self.triage_active = True
                 self.triage_known_answers.update(parsed.get("known_answers_update", {}))
-                self.triage_question_count = len(self.triage_known_answers)
+                self.triage_question_count = self.triage_question_count + 1
             elif parsed.get("status") == "final":
                 self.triage_active = False
                 self.triage_known_answers = {}
@@ -545,7 +545,8 @@ class AgentSession:
                         f"Use nhs_111_live_triage with known_answers={json.dumps(self.triage_known_answers)}. "
                         "Ask only triage follow-up questions until triage status='final'. "
                         "Do NOT repeat topics already in known_answers (e.g., severity, onset, injury/trauma, functional ability, red flags already covered). "
-                        "Tailor follow-ups to the presenting issue, keep them concise, aim to finish within 5-8 questions, and NEVER exceed 10; if you already have 5 answers, move to a final decision."
+                        f"You have already asked {self.triage_question_count} follow-ups. "
+                        "Tailor follow-ups to the presenting issue, keep them concise, aim to finish within 5-8 questions, and NEVER exceed 10; if you already have 5 answers or 5 questions asked, move to a final decision."
                     ),
                 }
             )
