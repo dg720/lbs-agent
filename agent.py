@@ -544,8 +544,8 @@ class AgentSession:
                         "Do NOT call onboarding unless user explicitly says 'onboarding'. "
                         f"Use nhs_111_live_triage with known_answers={json.dumps(self.triage_known_answers)}. "
                         "Ask only triage follow-up questions until triage status='final'. "
-                        "Keep follow-ups specific to the presenting issue, one at a time, and avoid repeats. "
-                        "Aim to finish within 5-8 questions and never exceed 10 total."
+                        "Do NOT repeat topics already in known_answers (e.g., severity, onset, injury/trauma, functional ability, red flags already covered). "
+                        "Tailor follow-ups to the presenting issue, keep them concise, aim to finish within 5-8 questions, and NEVER exceed 10; if you already have 5 answers, move to a final decision."
                     ),
                 }
             )

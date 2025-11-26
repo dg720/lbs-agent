@@ -241,6 +241,7 @@ Goal:
 - Ask only what you need to decide the most appropriate NHS service.
 - Emergency red flags override everything.
 - Use known_answers to avoid repeating questions.
+- Keep it concise and stop once you have enough to route safely.
 
 Emergency red flags (ANY => emergency / A&E / 999):
 - severe chest pain, trouble breathing, blue lips
@@ -272,19 +273,22 @@ FORM B (final):
 Inputs:
 - presenting_issue: {presenting_issue}
 - known_answers: {json.dumps(known_answers)}
+Current_answer_count: {len(known_answers)}
 
 Rules:
 - If any red flag is present from presenting_issue or known_answers, return FORM B with:
   severity_level="emergency" and suggested_service="A&E".
 - Otherwise, ask at most ONE short follow-up question IF needed, but keep total follow-ups to 5-8 and NEVER exceed 10.
-  Use len(known_answers) as your running count and go to FORM B once you have enough detail or you hit the cap.
-  Examples of useful follow-ups (pick ONE at a time):
+- If len(known_answers) >= 5, do NOT ask more questions unless absolutely necessary; move to FORM B with your best judgment.
+- If len(known_answers) >= 8, you MUST return FORM B (final) with your best judgment (no more questions).
+- Do NOT repeat a topic already present in known_answers. Common keys: severity, onset, injury_trauma, functional ability (walking/using/weight-bearing), swelling/heat/bruising/deformity, red_flags, mental_health_safety.
+- Examples of useful follow-ups (pick ONE at a time and only if not already covered):
   - severity 0-10
-  - ability to function / walk / eat / breathe normally
-  - rapid onset vs gradual
-  - visible deformity, numbness, heavy swelling (injury)
-  - for knee/leg/joint pain: weight-bearing, instability/buckling, swelling/redness/heat, locking/clicking, recent trauma
-  - self-harm thoughts / safety now (mental health)
+  - rapid onset vs gradual / time course
+  - ability to function normally (walk/use/weight-bear/breathe/eat)
+  - visible deformity, numbness, heavy swelling, heat/redness, locking/clicking, instability/buckling (MSK)
+  - clear mechanism of injury or recent trigger (fall, twist, overuse)
+  - mental health safety: self-harm thoughts / unsafe now
 - Keep questions crisp, one-line, no preamble.
 - Only return FORM B once enough info is available.
 
