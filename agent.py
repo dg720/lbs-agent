@@ -81,6 +81,7 @@ class AgentSession:
         self.triage_active = False
         self.triage_known_answers: Dict[str, Any] = {}
         self.triage_state: Optional[Dict[str, Any]] = None
+        self.triage_question_count = 0
 
         self.prompt_suggestions: List[str] = []
 
@@ -132,8 +133,11 @@ class AgentSession:
             if parsed.get("status") == "need_more_info":
                 self.triage_active = True
                 self.triage_known_answers.update(parsed.get("known_answers_update", {}))
+                self.triage_question_count = len(self.triage_known_answers)
             elif parsed.get("status") == "final":
                 self.triage_active = False
+                self.triage_known_answers = {}
+                self.triage_question_count = 0
 
         return parsed
 
@@ -507,43 +511,9 @@ class AgentSession:
             return self._process_final_reply(reply)
 
         # -------------------------------
-        # SHORT-CIRCUIT: DETERMINISTIC TRIAGE
-        # -------------------------------
-        lower_input = user_input.lower()
-        if self.triage_state:
-            self._triage_record_answer(user_input)
-            nxt = self._triage_next_question()
-            if nxt:
-                return self._process_final_reply(nxt)
-            summary = self._triage_summary()
-            self.triage_state = None
-            self.triage_active = False
-            return self._process_final_reply(summary)
-        else:
-            triage_triggers = {
-                "triage",
-                "feeling",
-                "symptom",
-                "pain",
-                "hurt",
-                "injury",
-                "sick",
-                "ill",
-                "fever",
-                "nausea",
-                "vomit",
-                "swelling",
-                "bleeding",
-            }
-        if not self.onboarding_active and any(tok in lower_input for tok in triage_triggers):
-            start_msg = self._start_triage_flow()
-            first_q = self._triage_next_question()
-            combined = f"{start_msg}\n\n{first_q}" if first_q else start_msg
-            return self._process_final_reply(combined)
-
-        # -------------------------------
         # SHORT-CIRCUIT: ELIGIBILITY QUERY
         # -------------------------------
+        lower_input = user_input.lower()
         if "eligible" in lower_input or "eligibility" in lower_input:
             reply = self._eligibility_response()
             return self._process_final_reply(reply)
@@ -572,7 +542,10 @@ class AgentSession:
                     "content": (
                         "TRIAGE MODE IS ACTIVE. "
                         "Do NOT call onboarding unless user explicitly says 'onboarding'. "
-                        "Ask only triage follow-up questions until triage status='final'."
+                        f"Use nhs_111_live_triage with known_answers={json.dumps(self.triage_known_answers)}. "
+                        "Ask only triage follow-up questions until triage status='final'. "
+                        "Keep follow-ups specific to the presenting issue, one at a time, and avoid repeats. "
+                        "Aim to finish within 5-8 questions and never exceed 10 total."
                     ),
                 }
             )

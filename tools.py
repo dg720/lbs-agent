@@ -223,6 +223,8 @@ def guided_search(args, max_results_default: int = 5):
     }
 
 
+
+
 def nhs_111_live_triage(args):
     """
     Lightweight LLM-led triage + routing for NHS 111.
@@ -242,7 +244,7 @@ Goal:
 
 Emergency red flags (ANY => emergency / A&E / 999):
 - severe chest pain, trouble breathing, blue lips
-- heavy bleeding that won’t stop
+- heavy bleeding that won't stop
 - stroke signs (face droop, arm weakness, speech trouble)
 - seizure / fainting / unconsciousness
 - sudden severe allergic reaction
@@ -262,7 +264,7 @@ FORM B (final):
   "status": "final",
   "severity_level": "low|medium|high|emergency",
   "suggested_service": "A&E|GP|NHS_111|PHARMACY_SELFCARE|MENTAL_HEALTH_CRISIS",
-  "rationale": "1–2 sentences",
+  "rationale": "1-2 sentences",
   "postcode_full": "{postcode_full}",
   "should_lookup": true|false
 }}
@@ -274,13 +276,15 @@ Inputs:
 Rules:
 - If any red flag is present from presenting_issue or known_answers, return FORM B with:
   severity_level="emergency" and suggested_service="A&E".
-- Otherwise, ask at most ONE short follow-up question IF needed (never more than one).
-  Examples of useful follow-ups (pick ONE):
-  • severity 0–10
-  • ability to function / walk / eat / breathe normally
-  • rapid onset vs gradual
-  • visible deformity, numbness, heavy swelling (injury)
-  • self-harm thoughts / safety now (mental health)
+- Otherwise, ask at most ONE short follow-up question IF needed, but keep total follow-ups to 5-8 and NEVER exceed 10.
+  Use len(known_answers) as your running count and go to FORM B once you have enough detail or you hit the cap.
+  Examples of useful follow-ups (pick ONE at a time):
+  - severity 0-10
+  - ability to function / walk / eat / breathe normally
+  - rapid onset vs gradual
+  - visible deformity, numbness, heavy swelling (injury)
+  - for knee/leg/joint pain: weight-bearing, instability/buckling, swelling/redness/heat, locking/clicking, recent trauma
+  - self-harm thoughts / safety now (mental health)
 - Keep questions crisp, one-line, no preamble.
 - Only return FORM B once enough info is available.
 
