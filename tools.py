@@ -1,3 +1,5 @@
+"""Tool implementations for onboarding, safety, triage, search, and lookups."""
+
 import json
 import os
 from urllib.parse import quote_plus
@@ -408,6 +410,7 @@ tools = [
 
 
 def tool_nearest_nhs_services(args):
+    """Wrapper to expose nearest_nhs_services to the tool dispatcher."""
     return nearest_nhs_services(
         postcode_full=args["postcode_full"],
         service_type=args["service_type"],
@@ -416,4 +419,5 @@ def tool_nearest_nhs_services(args):
 
 
 def tool_safety(_args):
+    """Return the standard emergency safety response."""
     return emergency_response()

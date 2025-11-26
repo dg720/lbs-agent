@@ -1,61 +1,28 @@
-# Data Project Template
+# Evi – NHS Guidance Copilot (LBS AI Agent Cup)
+Submission for the LBS AI Agent Cup (Team Evida). A Streamlit chat app that guides users through UK NHS navigation, onboarding, and triage with codified safety rules and curated links (NHS + LBS wellbeing).
 
-## Streamlit Chat Interface
+## Quick start
+- Install deps: `pip install -r requirements.txt`
+- Run UI: `streamlit run streamlit_app.py`
+- Set secrets: `OPENAI_API_KEY` (via `.env` for local or `st.secrets` on Streamlit Cloud).
 
-Run a simple local chat UI backed by the NHS 101 agent:
+## Repo map (essentials)
+- `streamlit_app.py` – Streamlit UI (hero, chat history, prompt suggestions, theming).
+- `agent.py` – Core agent session: onboarding, deterministic triage (NHS 111 style), eligibility check, link post-processing, prompt follow-ups, tool orchestration.
+- `tools.py` – Tool definitions: onboarding questionnaire, safety check, NHS 111 triage stub, guided search (web), nearest NHS services, emergency response.
+- `prompts.py` – System/intro text shown in the UI.
+- `.env` – Local secrets (not tracked). Use `OPENAI_API_KEY`.
+- `requirements.txt` – Python dependencies.
+- `README.md` – You are here.
+- `streamlit_app.py` + `agent.py` already read `OPENAI_API_KEY` from `st.secrets` or env for Streamlit Cloud.
 
-```bash
-pip install -r requirements.txt
-streamlit run streamlit_app.py
-```
+## How it works
+- Chat flow: user input → agent session (`agent.py`) → optional tools (triage, search, services) → post-processing (useful links, eligibility/onboarding summaries) → Streamlit render.
+- Onboarding: strict, ordered questions; stored profile; post-onboarding eligibility summary.
+- Triage: deterministic NHS 111-style Q&A with red-flag routing; offers GP/A&E lookup when complete.
+- Useful links: replaces any “Useful links” section with a curated NHS/LBS list (no duplicates/truncation).
 
-Make sure `OPENAI_API_KEY` is set in your environment before launching Streamlit.
-
-## Project Organization
-
-```
-├── LICENSE            <- Open-source license if one is chosen
-├── README.md          <- The top-level README for developers using this project
-├── data
-│   ├── external       <- Data from third party sources
-│   ├── interim        <- Intermediate data that has been transformed
-│   ├── processed      <- The final, canonical data sets for modeling
-│   └── raw            <- The original, immutable data dump
-│
-├── models             <- Trained and serialized models, model predictions, or model summaries
-│
-├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-│                         the creator's initials, and a short `-` delimited description, e.g.
-│                         `1.0-jqp-initial-data-exploration`
-│
-├── references         <- Data dictionaries, manuals, and all other explanatory materials
-│
-├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-│   └── figures        <- Generated graphics and figures to be used in reporting
-│
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
-│
-└── src                         <- Source code for this project
-    │
-    ├── __init__.py             <- Makes src a Python module
-    │
-    ├── config.py               <- Store useful variables and configuration
-    │
-    ├── dataset.py              <- Scripts to download or generate data
-    │
-    ├── features.py             <- Code to create features for modeling
-    │
-    │    
-    ├── modeling                
-    │   ├── __init__.py 
-    │   ├── predict.py          <- Code to run model inference with trained models          
-    │   └── train.py            <- Code to train models
-    │
-    ├── plots.py                <- Code to create visualizations 
-    │
-    └── services                <- Service classes to connect with external platforms, tools, or APIs
-        └── __init__.py 
-```
-
---------
+## Deploying to Streamlit Cloud
+1) Add secret `OPENAI_API_KEY` in the Streamlit app settings.  
+2) Run `streamlit_app.py` as the main entry point.  
+3) (Optional) Add other env vars in `st.secrets` as needed; the app already checks `st.secrets` before env.

@@ -1,3 +1,5 @@
+"""Streamlit UI for the Evi NHS/LBS companion."""
+
 import os
 
 import streamlit as st
@@ -15,6 +17,7 @@ if OPENAI_API_KEY:
 
 
 def ensure_state() -> AgentSession:
+    """Create or return the cached AgentSession and default prompt suggestions."""
     if "agent_session" not in st.session_state:
         st.session_state.agent_session = AgentSession()
         st.session_state.prompt_suggestions = [
@@ -27,6 +30,7 @@ def ensure_state() -> AgentSession:
 
 
 def render_history(session: AgentSession) -> None:
+    """Replay chat history into Streamlit chat containers."""
     for message in session.conversation_history:
         role = message.get("role")
         if role not in {"user", "assistant"}:
@@ -36,6 +40,7 @@ def render_history(session: AgentSession) -> None:
 
 
 def main() -> None:
+    """Render the Streamlit page and chat workflow."""
     st.set_page_config(
         page_title="Evi - LBS Healthcare companion", page_icon=":hospital:"
     )

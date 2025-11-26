@@ -1,3 +1,5 @@
+"""NHS/LBS chat agent session management, tools, and deterministic flows."""
+
 import json
 import os
 import re
@@ -26,6 +28,7 @@ PROFILE_TAG_RE = re.compile(r"<USER_PROFILE>.*?</USER_PROFILE>", re.DOTALL)
 
 
 def extract_profile(text: str) -> Optional[Dict[str, Any]]:
+    """Extract JSON profile dict from assistant text, if present."""
     match = re.search(r"<USER_PROFILE>(.*?)</USER_PROFILE>", text, re.DOTALL)
     if not match:
         return None
@@ -39,11 +42,13 @@ def extract_profile(text: str) -> Optional[Dict[str, Any]]:
 
 
 def strip_profile_tag(text: str) -> str:
+    """Remove profile tag wrapper so only user-facing content remains."""
     return PROFILE_TAG_RE.sub("", text).strip()
 
 
 # --- Tool Registry for Python-side Execution ---
 def execute_tool(tool_name: str, arguments: Dict[str, Any]):
+    """Dispatch supported tool calls by name."""
     if tool_name == "nearest_nhs_services":
         return tool_nearest_nhs_services(arguments)
     if tool_name == "trigger_safety_protocol":
@@ -88,6 +93,7 @@ class AgentSession:
     # SAFE MODEL CALL (TPM-aware)
     # -----------------------------
     def safe_create(self, **kwargs):
+        """Call OpenAI with retries and trimmed history if rate limited."""
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 return self.client.responses.create(**kwargs)
@@ -101,6 +107,7 @@ class AgentSession:
         raise
 
     def _update_state_from_tool(self, tool_name: str, tool_result: Any):
+        """Integrate tool outputs into onboarding/triage state tracking."""
         # onboarding activation
         if isinstance(tool_result, dict) and tool_result.get("mode") == "llm_multiturn_onboarding":
             self.onboarding_active = True
@@ -134,6 +141,7 @@ class AgentSession:
     # ONBOARDING HELPERS
     # -----------------------------
     def _onboarding_current_question(self) -> Optional[Dict[str, Any]]:
+        """Return the current onboarding question or None if finished."""
         if not self.onboarding_state:
             return None
         idx = self.onboarding_state.get("current_idx", 0)
@@ -143,6 +151,7 @@ class AgentSession:
         return questions[idx]
 
     def _prompt_next_onboarding_question(self) -> str:
+        """Set expectation flag and surface the next onboarding question text."""
         question = self._onboarding_current_question()
         if not question:
             return self._finalize_onboarding_flow()
@@ -151,6 +160,7 @@ class AgentSession:
         return question.get("question", "").strip()
 
     def _normalize_onboarding_answer(self, raw: str):
+        """Normalize onboarding input and indicate if a reprompt is needed."""
         text = (raw or "").strip()
         if text == "":
             return None, True
@@ -160,6 +170,7 @@ class AgentSession:
         return text, False
 
     def _finalize_onboarding_flow(self) -> str:
+        """Persist profile, add deterministic eligibility summary, and close onboarding."""
         questions = self.onboarding_state.get("questions") if self.onboarding_state else []
         answers = self.onboarding_state.get("answers") if self.onboarding_state else {}
         profile = {q.get("key"): answers.get(q.get("key")) for q in (questions or [])}
@@ -170,6 +181,7 @@ class AgentSession:
         return f"<USER_PROFILE>{profile_json}</USER_PROFILE>\n{summary}"
 
     def _eligibility_summary_from_profile(self, profile: Dict[str, Any]) -> str:
+        """Derive likely service eligibility based on stored onboarding answers."""
         stay = (profile.get("stay_length") or "").lower()
         visa = (profile.get("visa_status") or "").lower()
         postcode = profile.get("postcode") or ""
@@ -204,6 +216,7 @@ class AgentSession:
     # TRIAGE HELPERS (codified)
     # -----------------------------
     def _start_triage_flow(self) -> str:
+        """Initialize deterministic triage question list (NHS 111 inspired)."""
         self.triage_state = {
             "questions": [
                 ("severity", "On a scale of 0 to 10, how severe are your symptoms right now?"),
@@ -223,6 +236,7 @@ class AgentSession:
         return "I'll follow NHS 111 style triage. Please answer a few quick questions so I can route you correctly."
 
     def _triage_next_question(self) -> Optional[str]:
+        """Return next triage question text or None when all asked."""
         if not self.triage_state:
             return None
         idx = self.triage_state.get("idx", 0)
@@ -232,6 +246,7 @@ class AgentSession:
         return qs[idx][1]
 
     def _triage_record_answer(self, user_input: str) -> None:
+        """Store user triage answer and advance the pointer."""
         if not self.triage_state:
             return
         idx = self.triage_state.get("idx", 0)
@@ -243,6 +258,7 @@ class AgentSession:
         self.triage_state["idx"] = idx + 1
 
     def _triage_summary(self) -> str:
+        """Summarize triage inputs, suggest routing, and offer postcode-based lookup."""
         answers = (self.triage_state or {}).get("answers", {})
         severity = answers.get("severity", "")
         fluids = answers.get("fluids", "").lower()
