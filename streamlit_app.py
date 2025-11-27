@@ -31,11 +31,11 @@ def ensure_state() -> AgentSession:
 
 def render_history(session: AgentSession) -> None:
     """Replay chat history into Streamlit chat containers."""
-    for idx, message in enumerate(session.conversation_history):
+    for message in session.conversation_history:
         role = message.get("role")
         if role not in {"user", "assistant"}:
             continue
-        with st.chat_message(role, key=f"msg-{idx}-{role}"):
+        with st.chat_message(role):
             st.markdown(message.get("content", ""))
 
 
